@@ -33,6 +33,7 @@ export function decideReceipt(r: ExtractedReceipt, today: string): Decision {
   const ageDays = (Date.parse(today + 'T00:00:00Z') - Date.parse(r.transactionDate + 'T00:00:00Z')) / 86_400_000;
   if (ageDays > 2) return { status: 'REJECTED', reason: 'EXPIRED_RECEIPT' };
   if (ageDays < 0) return { status: 'REVIEW_REQUIRED', reason: 'FUTURE_DATE' };
+  if (r.anomalies.includes('AI_OUTPUT_NORMALIZED_FROM_PROSE')) return { status: 'REVIEW_REQUIRED', reason: 'AI_OUTPUT_UNVERIFIED' };
   if (r.suspectedTampering || r.anomalies.length > 0) return { status: 'REVIEW_REQUIRED', reason: 'POSSIBLE_TAMPERING' };
   if (!r.bank || !r.reference || !Number.isFinite(r.amount) || (r.amount ?? 0) <= 0 || !r.currency) {
     return { status: 'REVIEW_REQUIRED', reason: 'MISSING_REQUIRED_FIELDS' };
