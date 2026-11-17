@@ -62,3 +62,17 @@ npm run deploy
 1. Workers AI + extracción estructurada.
 2. Clasificación (transferencia/efectivo/cheque), regla de 2 días, rechazo de cheque, comprobación de referencia y anomalías visuales.
 3. Claims atómicos para bloquear duplicados semánticos, autenticación administrativa y flujo de revisión manual.
+
+## Fase 2 — Workers AI y CI/CD
+
+El endpoint `POST /api/receipts` procesa imágenes con `@cf/meta/llama-3.2-11b-vision-instruct`. Devuelve `APPROVED`, `REJECTED` o `REVIEW_REQUIRED`; la aprobación es **documental**, no confirma el depósito bancario. Clasifica cheques para rechazo, evalúa el límite de dos días calendario (Guatemala) y reserva referencias para evitar reutilización.
+
+Las anomalías visuales producen `REVIEW_REQUIRED`, nunca una afirmación concluyente de falsificación. El detector requiere validación con comprobantes reales: la IA puede equivocarse y aún no hay revisión administrativa.
+
+La migración `0002_ai_validation.sql` añade `receipt_claims`. En producción, el workflow de despliegue aplica migraciones **antes** de desplegar, solo después de CI exitoso en `main` o mediante ejecución manual.
+
+Para GitHub Actions, configurar secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`. El CI en PR instala dependencias, genera tipos con Wrangler, ejecuta TypeScript, tests y dry-run sin secretos. El deploy utiliza ambos secretos.
+
+Para el primer uso del modelo Meta es necesario aceptar su licencia con una solicitud `prompt: "agree"` desde una cuenta autorizada. Consultar https://developers.cloudflare.com/workers-ai/models/llama-3.2-11b-vision-instruct/.
+
+Limitaciones: no hay análisis forense concluyente ni detección de duplicados de imágenes reeditadas sin referencia reconocible; el endpoint aún no implementa acceso administrativo a imágenes o revisión manual.
