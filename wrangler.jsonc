@@ -1,29 +1,32 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "receipt-validator",
-	"main": "src/index.ts",
-	"compatibility_date": "2026-11-16",
-	"assets": {
-		"directory": "./public",
-		"binding": "ASSETS",
-		"run_worker_first": [
-			"/api/*"
-		]
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "receipt-validator-db",
-			"database_id": "55d2c3ff-4532-43d0-b556-4b612ca09a81",
-			"migrations_dir": "migrations",
-			"remote": true
-		}
-	],
-	"r2_buckets": [
-		{
-			"bucket_name": "receipt-validator-files",
-			"binding": "RECEIPTS",
-			"remote": true
-		}
-	]
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "receipt-validator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-16",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "receipt-validator-db",
+      "database_id": "55d2c3ff-4532-43d0-b556-4b612ca09a81",
+      "migrations_dir": "migrations",
+      "remote": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "bucket_name": "receipt-validator-files",
+      "binding": "RECEIPTS",
+      "remote": true
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
 }
