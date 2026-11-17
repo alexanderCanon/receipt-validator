@@ -1,6 +1,6 @@
 import type { Bindings } from './types';
 import type { ExtractedReceipt, OperationType } from './validation';
-import { normalizeAccount } from './accounts';
+import { normalizeAccount } from './accounts.ts';
 
 const VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 const JSON_MODEL = '@cf/meta/llama-3.1-8b-instruct';
