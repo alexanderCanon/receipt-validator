@@ -76,3 +76,32 @@ Para GitHub Actions, configurar secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_AC
 Para el primer uso del modelo Meta es necesario aceptar su licencia con una solicitud `prompt: "agree"` desde una cuenta autorizada. Consultar https://developers.cloudflare.com/workers-ai/models/llama-3.2-11b-vision-instruct/.
 
 Limitaciones: no hay análisis forense concluyente ni detección de duplicados de imágenes reeditadas sin referencia reconocible; el endpoint aún no implementa acceso administrativo a imágenes o revisión manual.
+
+## Extracción robusta y reprocesamiento (corrección)
+
+El modelo de visión puede devolver texto libre incluso cuando se solicita JSON. Se intenta
+primero parsear JSON directo, entre fences o incrustado en una respuesta. Si no existe JSON,
+una **segunda llamada** al modelo de texto `@cf/meta/llama-3.1-8b-instruct` solicita JSON Mode.
+Los resultados de esta normalización NUNCA se aprueban automáticamente:
+se marcan `REVIEW_REQUIRED / AI_OUTPUT_UNVERIFIED`. Esto puede aumentar el consumo de Workers AI.
+
+### Reprocesar una imagen ya almacenada
+
+Una nueva migración D1 añade el contador de intentos:
+`migrations/0003_reprocessing.sql`. El CD la aplica antes del despliegue.
+
+Configura una clave **distinta** de Turnstile y del token de Cloudflare, aleatoria y >=24 caracteres:
+```bash
+pnpm exec wrangler secret put ADMIN_REPROCESS_TOKEN
+```
+
+Solo el servidor verifica la clave. No la expongas en el frontend ni la agregues a GitHub.
+Ejemplo de ejecución (ID obtenido de la respuesta original):
+```bash
+curl -X POST "https://receipt-validator.nexp1010.workers.dev/api/admin/receipts/UUID/reprocess" \
+  -H "Authorization: Bearer $ADMIN_REPROCESS_TOKEN"
+```
+Este endpoint admite únicamente comprobantes `REVIEW_REQUIRED` por
+`AI_EXTRACTION_FAILED` o `AI_OUTPUT_UNVERIFIED`, con **máximo dos reprocesamientos**.
+Reutiliza el original privado de R2 y no crea un archivo duplicado.
+No permite revisar manualmente, ni consultar imágenes públicas.
