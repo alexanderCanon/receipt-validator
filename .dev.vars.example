@@ -1,0 +1,4 @@
+# Solo para desarrollo local. Nunca se usa para omitir Turnstile en producción.
+DEV_BYPASS_TURNSTILE=true
+# Configurar para producción:
+# TURNSTILE_SECRET_KEY=...

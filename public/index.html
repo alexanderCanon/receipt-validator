@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Validador de comprobantes</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header><span class="eyebrow">MVP · Fase 1</span><h1>Comprobantes bancarios</h1>
+      <p>Sube un comprobante de depósito o transferencia. Por ahora solo se almacena y se detectan archivos idénticos; la validación documental se implementará en la siguiente fase.</p>
+    </header>
+    <section class="panel" aria-label="Carga de comprobante">
+      <form id="uploadForm">
+        <label for="receipt">Imagen del comprobante</label>
+        <input required type="file" name="receipt" id="receipt" accept="image/jpeg,image/png,image/webp" />
+        <small>JPG, PNG o WebP · Máximo 5 MB</small>
+        <div id="turnstileContainer"></div>
+        <button type="submit" id="submitBtn">Enviar comprobante</button>
+      </form>
+      <output id="result" role="status" aria-live="polite"></output>
+    </section>
+    <footer>Los archivos originales se almacenan de manera privada. No se confirma ningún pago.</footer>
+  </main>
+  <script src="/config.js"></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
