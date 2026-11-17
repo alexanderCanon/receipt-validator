@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import type { Bindings } from './types';
 import { MAX_FILE_BYTES, detectImageMime, extensionForMime, hexSha256 } from './file-validation';
+import { extractReceipt } from './extraction';
+import { decideReceipt, guatemalaToday, normalizeClaim } from './validation';
+import type { Decision, ExtractedReceipt } from './validation';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
-app.get('/api/health', (c) => c.json({ status: 'ok', phase: 'storage-and-exact-duplicates' }));
+app.get('/api/health', (c) => c.json({ status: 'ok', phase: 'ai-document-validation' }));
 
 async function verifyTurnstile(
   token: string | undefined,
@@ -88,7 +91,68 @@ app.post('/api/receipts', async (c) => {
     return c.json({ status: 'ERROR', reason: 'STORAGE_FAILURE', message: 'No fue posible registrar el comprobante.' }, 500);
   }
 
-  return c.json({ id, status: 'PENDING_ANALYSIS', message: 'Comprobante recibido y almacenado; todavía no ha sido validado.' }, 201);
+  let extracted: ExtractedReceipt | null = null;
+  let decision: Decision;
+  try {
+    extracted = await extractReceipt(c.env, bytes, mime);
+    decision = decideReceipt(extracted, guatemalaToday(new Date()));
+  } catch (error) {
+    console.error('AI extraction failed', error instanceof Error ? error.message : 'unknown');
+    decision = { status: 'REVIEW_REQUIRED', reason: 'AI_EXTRACTION_FAILED' };
+  }
+
+  const claim = extracted && decision.status !== 'REJECTED' ? normalizeClaim(extracted) : null;
+  const persist = (d: Decision) => c.env.DB.prepare(`UPDATE receipts SET
+    status = ?, reason = ?, extracted_json = ?, anomalies_json = ?, processed_at = CURRENT_TIMESTAMP
+    WHERE id = ?`).bind(d.status, d.reason,
+      extracted ? JSON.stringify(extracted) : null,
+      extracted ? JSON.stringify(extracted.anomalies) : null, id);
+  try {
+    if (claim) {
+      await c.env.DB.batch([
+        c.env.DB.prepare('INSERT INTO receipt_claims (claim_key, receipt_id) VALUES (?, ?)').bind(claim, id),
+        persist(decision),
+      ]);
+    } else {
+      await persist(decision).run();
+    }
+  } catch (error) {
+    if (claim) {
+      const existingClaim = await c.env.DB.prepare('SELECT receipt_id FROM receipt_claims WHERE claim_key = ?')
+        .bind(claim).first();
+      if (existingClaim) {
+        decision = { status: 'REJECTED', reason: 'DUPLICATE_RECEIPT' };
+        await persist(decision).run();
+      } else {
+        console.error('Claim transaction failed', error);
+        return c.json({ id, status: 'ERROR', reason: 'PERSISTENCE_FAILED', message: 'No se pudo finalizar la validación.' }, 500);
+      }
+    } else {
+      console.error('Validation persist failed', error);
+      return c.json({ id, status: 'ERROR', reason: 'PERSISTENCE_FAILED', message: 'No se pudo finalizar la validación.' }, 500);
+    }
+  }
+
+  const messages: Record<string, string> = {
+    DOCUMENT_CHECKS_PASSED: 'El comprobante superó las verificaciones documentales. No confirma la recepción bancaria.',
+    CHECK_DEPOSIT: 'No se aceptan depósitos por cheque.',
+    EXPIRED_RECEIPT: 'El comprobante tiene más de dos días de antigüedad.',
+    DUPLICATE_RECEIPT: 'Este comprobante ya fue utilizado o está pendiente de revisión.',
+    POSSIBLE_TAMPERING: 'El comprobante requiere revisión por posibles anomalías.',
+    UNREADABLE_DATE: 'La fecha no se pudo verificar. Se requiere revisión.',
+    FUTURE_DATE: 'La fecha del comprobante es futura. Se requiere revisión.',
+    MISSING_REQUIRED_FIELDS: 'Faltan campos obligatorios. Se requiere revisión.',
+    UNKNOWN_OPERATION: 'No fue posible clasificar la operación. Se requiere revisión.',
+    AI_EXTRACTION_FAILED: 'No fue posible analizar el comprobante automáticamente. Se requiere revisión.',
+  };
+  const httpStatus = decision.status === 'APPROVED' ? 201 : decision.status === 'REJECTED' ? 422 : 202;
+  return c.json({ id, status: decision.status, reason: decision.reason,
+    message: messages[decision.reason] ?? 'Comprobante procesado.',
+    receipt: extracted ? {
+      bank: extracted.bank, operationType: extracted.operationType, reference: extracted.reference,
+      amount: extracted.amount, currency: extracted.currency, transactionDate: extracted.transactionDate,
+    } : null,
+  }, httpStatus);
 });
 
 app.get('/api/receipts/:id', async (c) => {
