@@ -144,6 +144,7 @@ app.post('/api/receipts', async (c) => {
     MISSING_REQUIRED_FIELDS: 'Faltan campos obligatorios. Se requiere revisión.',
     UNKNOWN_OPERATION: 'No fue posible clasificar la operación. Se requiere revisión.',
     AI_EXTRACTION_FAILED: 'No fue posible analizar el comprobante automáticamente. Se requiere revisión.',
+    AI_OUTPUT_UNVERIFIED: 'La extracción automática requiere confirmación manual.',
   };
   const httpStatus = decision.status === 'APPROVED' ? 201 : decision.status === 'REJECTED' ? 422 : 202;
   return c.json({ id, status: decision.status, reason: decision.reason,
@@ -158,6 +159,86 @@ app.post('/api/receipts', async (c) => {
 app.get('/api/receipts/:id', async (c) => {
   // Deliberadamente no hay consulta pública por ID: el identificador no autentica al titular.
   return c.json({ message: 'La consulta se habilitará con autenticación en la siguiente fase.' }, 501);
+});
+
+
+async function authorizedAdmin(authorization: string | undefined, secret: string | undefined): Promise<boolean> {
+  if (!authorization?.startsWith('Bearer ') || !secret || secret.length < 24) return false;
+  const provided = authorization.slice(7);
+  if (!provided || provided.length > 512) return false;
+  const [a, b] = await Promise.all([provided, secret].map(value =>
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))));
+  const left = new Uint8Array(a), right = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
+  return diff === 0;
+}
+
+app.post('/api/admin/receipts/:id/reprocess', async (c) => {
+  if (!await authorizedAdmin(c.req.header('authorization'), c.env.ADMIN_REPROCESS_TOKEN)) {
+    return c.json({ message: 'No autorizado.' }, 401);
+  }
+  const id = c.req.param('id');
+  if (!/^[a-f0-9-]{36}$/i.test(id)) return c.json({ message: 'ID inválido.' }, 400);
+  const row = await c.env.DB.prepare(`SELECT id, r2_key, mime_type, status, reason, retry_count
+    FROM receipts WHERE id = ?`).bind(id).first<{
+      id: string; r2_key: string; mime_type: string; status: string; reason: string | null; retry_count: number
+    }>();
+  if (!row) return c.json({ message: 'No existe el comprobante.' }, 404);
+  if (row.status !== 'REVIEW_REQUIRED' ||
+      !['AI_EXTRACTION_FAILED', 'AI_OUTPUT_UNVERIFIED'].includes(row.reason ?? '')) {
+    return c.json({ message: 'El comprobante no es elegible para reprocesamiento.' }, 409);
+  }
+  if (row.retry_count >= 2) return c.json({ message: 'Límite de reprocesamientos alcanzado.' }, 429);
+  const lock = await c.env.DB.prepare(`UPDATE receipts SET retry_count = retry_count + 1, status = 'PROCESSING'
+    WHERE id = ? AND status = 'REVIEW_REQUIRED'
+    AND reason IN ('AI_EXTRACTION_FAILED', 'AI_OUTPUT_UNVERIFIED') AND retry_count < 2`)
+    .bind(id).run();
+  if (lock.meta.changes !== 1) return c.json({ message: 'Solicitud ya está en proceso.' }, 409);
+  let extracted: ExtractedReceipt | null = null;
+  let decision: Decision = { status: 'REVIEW_REQUIRED', reason: 'AI_EXTRACTION_FAILED' };
+  try {
+    const obj = await c.env.RECEIPTS.get(row.r2_key);
+    if (!obj) throw new Error('R2 original not found');
+    const bytes = new Uint8Array(await obj.arrayBuffer());
+    extracted = await extractReceipt(c.env, bytes, row.mime_type);
+    decision = decideReceipt(extracted, guatemalaToday(new Date()));
+  } catch (err) {
+    console.error('AI reprocess failed', err instanceof Error ? err.message : 'unknown');
+  }
+  const persist = (status: Decision) => c.env.DB.prepare(`UPDATE receipts SET
+    status = ?, reason = ?, extracted_json = ?, anomalies_json = ?, processed_at = CURRENT_TIMESTAMP
+    WHERE id = ?`).bind(status.status, status.reason,
+      extracted ? JSON.stringify(extracted) : null,
+      extracted ? JSON.stringify(extracted.anomalies) : null, id);
+  const claim = extracted && decision.status !== 'REJECTED' ? normalizeClaim(extracted) : null;
+  try {
+    if (claim) {
+      await c.env.DB.batch([
+        c.env.DB.prepare('INSERT INTO receipt_claims (claim_key, receipt_id) VALUES (?, ?)').bind(claim, id),
+        persist(decision),
+      ]);
+    } else {
+      await persist(decision).run();
+    }
+  } catch (err) {
+    if (claim && await c.env.DB.prepare('SELECT receipt_id FROM receipt_claims WHERE claim_key = ?')
+      .bind(claim).first()) {
+      decision = { status: 'REJECTED', reason: 'DUPLICATE_RECEIPT' };
+      await persist(decision).run();
+    } else {
+      console.error('AI reprocess persist failed', err);
+      await c.env.DB.prepare(`UPDATE receipts SET status = 'REVIEW_REQUIRED', reason = 'AI_EXTRACTION_FAILED'
+        WHERE id = ? AND status = 'PROCESSING'`).bind(id).run();
+      return c.json({ message: 'Error al persistir el resultado.' }, 500);
+    }
+  }
+  return c.json({ id, status: decision.status, reason: decision.reason,
+    message: 'Reprocesamiento finalizado.', receipt: extracted ? {
+      bank: extracted.bank, reference: extracted.reference, amount: extracted.amount,
+      operationType: extracted.operationType, transactionDate: extracted.transactionDate,
+    } : null,
+  });
 });
 
 app.onError((err, c) => {

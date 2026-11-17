@@ -7,10 +7,7 @@ test('parsea salida JSON del modelo', () => {
   assert.equal(result.reference, '123');
 });
 test('no inventa campos si vienen ausentes', () => {
-  const result = parseExtraction({ response: '{}' });
-  assert.equal(result.operationType, 'UNKNOWN');
-  assert.equal(result.reference, null);
-  assert.equal(result.amount, null);
+  assert.throws(() => parseExtraction({ response: '{}' }));
 });
 test('falla de forma explícita con JSON inválido', () => {
   assert.throws(() => parseExtraction({ response: 'No puedo leer el documento' }));
