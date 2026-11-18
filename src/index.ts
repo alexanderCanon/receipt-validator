@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Bindings } from './types';
 import { MAX_FILE_BYTES, detectImageMime, extensionForMime, hexSha256 } from './file-validation';
 import { extractReceipt } from './extraction';
+import { sameOrigin, sessionActive, login, logout, expiredCookie } from './auth';
 import { verifyDestinationAccount } from './accounts';
 import { decideReceipt, guatemalaToday, normalizeClaim } from './validation';
 import type { Decision, ExtractedReceipt } from './validation';
@@ -34,7 +35,42 @@ async function verifyTurnstile(
   }
 }
 
+app.post('/api/auth/login', async (c) => {
+  if (!sameOrigin(c.req.raw)) return c.json({ message: 'Origen no autorizado.' }, 403);
+  const body = await c.req.json<{ pin?: unknown }>().catch(() => null);
+  const ip = c.req.header('cf-connecting-ip') || 'unknown';
+  const result = await login(body?.pin, ip, c.env);
+  if (!result.ok) {
+    const messages: Record<number, string> = {
+      400: 'El código debe contener 6 dígitos.',
+      401: 'Código de acceso incorrecto.',
+      429: 'Demasiados intentos. Prueba en 15 minutos.',
+      503: 'El acceso aún no está configurado.',
+    };
+    return c.json({ message: messages[result.status] }, result.status);
+  }
+  c.header('Set-Cookie', result.cookie);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ authenticated: true });
+});
+app.get('/api/auth/session', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.json({ authenticated: await sessionActive(c.req.raw, c.env.DB) });
+});
+app.post('/api/auth/logout', async (c) => {
+  if (!sameOrigin(c.req.raw)) return c.json({ message: 'Origen no autorizado.' }, 403);
+  await logout(c.req.raw, c.env.DB);
+  c.header('Set-Cookie', expiredCookie());
+  return c.json({ authenticated: false });
+});
+
 app.post('/api/receipts', async (c) => {
+  // Authentication is enforced server-side BEFORE upload, R2, D1, and Workers AI.
+  if (!sameOrigin(c.req.raw)) return c.json({ message: 'Origen no autorizado.' }, 403);
+  if (!await sessionActive(c.req.raw, c.env.DB)) {
+    return c.json({ reason: 'AUTH_REQUIRED', message: 'Ingresa tu código para validar comprobantes.' }, 401);
+  }
+
   const declaredLength = Number(c.req.header('content-length') || 0);
   if (declaredLength > MAX_FILE_BYTES + 100_000) {
     return c.json({ status: 'REJECTED', reason: 'FILE_TOO_LARGE', message: 'Máximo 5 MB por imagen.' }, 413);
