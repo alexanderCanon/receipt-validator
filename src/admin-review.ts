@@ -68,7 +68,7 @@ admin.get('/receipts', async (c)=>{
     FROM receipts WHERE 1=1 ${clause}
     AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
     ORDER BY created_at DESC,id DESC LIMIT ?`;
-  const params: unknown[] = [];
+  const params: (string | number)[] = [];
   if (status !== 'ALL') params.push(status);
   params.push(beforeDate,beforeDate,beforeDate,beforeId,limit+1);
   const result = await c.env.DB.prepare(sql).bind(...params).all();
