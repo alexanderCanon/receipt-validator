@@ -145,6 +145,12 @@ admin.post('/receipts/:id/review', async (c)=>{
         (next as unknown as Record<string,unknown>)[key]=value;
       }
     }
+    if (!['BANK_TRANSFER','CASH_DEPOSIT','CHECK_DEPOSIT','UNKNOWN'].includes(next.operationType)) {
+      return c.json({message:'Tipo de operación inválido'},400);
+    }
+    if (next.currency !== null && !['GTQ','USD'].includes(next.currency)) {
+      return c.json({message:'Moneda inválida'},400);
+    }
     next.destinationAccount=normalizeAccount(next.destinationAccount);
     // Anomalies are human-reviewed; objective rules still apply (date, cheque, account, amount).
     const guarded={...next,suspectedTampering:false,anomalies:[]};
