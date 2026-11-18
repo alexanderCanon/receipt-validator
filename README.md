@@ -148,3 +148,31 @@ Se rechazan peticiones POST con `Origin` diferente o ausente.
 El acceso limita usos no autorizados, pero no sustituye una identidad individual.
 Quien conozca el PIN puede compartirlo. Para rotarlo, actualiza ACCESS_PIN;
 para invalidar las sesiones existentes elimina los registros de `auth_sessions`.
+
+## Panel administrativo
+
+Abre `/admin.html`. La credencial es el **ADMIN_REPROCESS_TOKEN** existente, no el PIN de 6 dígitos.
+El formulario principal sigue público pero la carga requiere su sesión de usuario.
+El panel crea una cookie `rv_admin` HttpOnly, Secure, SameSite=Strict, con duración de 4 horas;
+no guarda la credencial administrativa en localStorage, sessionStorage ni el repositorio.
+
+- `POST /api/admin/login`: recibe `{"token":"..."}` y crea la sesión.
+- `GET /api/admin/session`, `POST /api/admin/logout`: consultar/cerrar sesión.
+- `GET /api/admin/receipts?status=REVIEW_REQUIRED&before=...`: listar (30 por página).
+- `GET /api/admin/receipts/:id`: detalle y auditoría.
+- `GET /api/admin/receipts/:id/image`: transmite desde R2 con cookie administrativa y `Cache-Control: no-store`. Nunca publica una URL R2.
+- `POST /api/admin/receipts/:id/review`: aprobar o rechazar SOLO `REVIEW_REQUIRED`; requiere justificación y, si aprueba, campos de extracción verificados manualmente.
+
+La aprobación humana **no puede omitir** las reglas de fecha, prohibición de cheque, monto,
+campos mínimos, cuenta destino autorizada o duplicados. Puede revisar anomalías subjetivas
+si inspeccionó el original. Al aprobar se reserva la referencia en `receipt_claims`;
+al rechazar se libera el claim del propio comprobante. La decisión y justificación se
+guardan en `receipt_reviews` (migración `0006_admin_reviews.sql`).
+El estado aprobado significa validación documental, no confirmación bancaria.
+
+El endpoint de reprocesamiento sigue admitiendo bearer admin para scripts, y ahora
+admite también la cookie de sesión administrativa en solicitudes del mismo origen.
+Revalida la cuenta autorizada y evita rechazar una referencia reservada por el mismo comprobante.
+
+IMPORTANTE: el panel maneja recibos y datos de terceros. Mantén privado el token de
+administración, limita quién puede acceder y no compartas los comprobantes.

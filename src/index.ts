@@ -3,11 +3,15 @@ import type { Bindings } from './types';
 import { MAX_FILE_BYTES, detectImageMime, extensionForMime, hexSha256 } from './file-validation';
 import { extractReceipt } from './extraction';
 import { sameOrigin, sessionActive, login, logout, expiredCookie } from './auth';
+import { validAdminBearer, validAdminCookie } from './admin-auth';
+import admin from './admin-review';
 import { verifyDestinationAccount } from './accounts';
 import { decideReceipt, guatemalaToday, normalizeClaim } from './validation';
 import type { Decision, ExtractedReceipt } from './validation';
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.route('/api/admin',admin);
 
 app.get('/api/health', (c) => c.json({ status: 'ok', phase: 'ai-document-validation' }));
 
@@ -204,20 +208,9 @@ app.get('/api/receipts/:id', async (c) => {
 });
 
 
-async function authorizedAdmin(authorization: string | undefined, secret: string | undefined): Promise<boolean> {
-  if (!authorization?.startsWith('Bearer ') || !secret || secret.length < 24) return false;
-  const provided = authorization.slice(7);
-  if (!provided || provided.length > 512) return false;
-  const [a, b] = await Promise.all([provided, secret].map(value =>
-    crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))));
-  const left = new Uint8Array(a), right = new Uint8Array(b);
-  let diff = 0;
-  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
-  return diff === 0;
-}
-
 app.post('/api/admin/receipts/:id/reprocess', async (c) => {
-  if (!await authorizedAdmin(c.req.header('authorization'), c.env.ADMIN_REPROCESS_TOKEN)) {
+  if (!await validAdminBearer(c.req.raw,c.env) &&
+      !(sameOrigin(c.req.raw) && await validAdminCookie(c.req.raw,c.env))) {
     return c.json({ message: 'No autorizado.' }, 401);
   }
   const id = c.req.param('id');
@@ -245,6 +238,7 @@ app.post('/api/admin/receipts/:id/reprocess', async (c) => {
     const bytes = new Uint8Array(await obj.arrayBuffer());
     extracted = await extractReceipt(c.env, bytes, row.mime_type);
     decision = decideReceipt(extracted, guatemalaToday(new Date()));
+    decision = await verifyDestinationAccount(c.env.DB, extracted, decision);
   } catch (err) {
     console.error('AI reprocess failed', err instanceof Error ? err.message : 'unknown');
   }
@@ -256,24 +250,41 @@ app.post('/api/admin/receipts/:id/reprocess', async (c) => {
   const claim = extracted && decision.status !== 'REJECTED' ? normalizeClaim(extracted) : null;
   try {
     if (claim) {
-      await c.env.DB.batch([
-        c.env.DB.prepare('INSERT INTO receipt_claims (claim_key, receipt_id) VALUES (?, ?)').bind(claim, id),
-        persist(decision),
-      ]);
+      const existing = await c.env.DB.prepare('SELECT receipt_id FROM receipt_claims WHERE claim_key = ?')
+        .bind(claim).first<{receipt_id:string}>();
+      if (existing?.receipt_id === id) {
+        // Reprocessing the original receipt must not reject its own reserved reference.
+        await persist(decision).run();
+      } else if (existing) {
+        decision = { status: 'REJECTED', reason: 'DUPLICATE_RECEIPT' };
+        await persist(decision).run();
+      } else {
+        try {
+          await c.env.DB.batch([
+            c.env.DB.prepare('INSERT INTO receipt_claims (claim_key, receipt_id) VALUES (?, ?)').bind(claim,id),
+            persist(decision),
+          ]);
+        } catch {
+          const owner = await c.env.DB.prepare('SELECT receipt_id FROM receipt_claims WHERE claim_key = ?')
+            .bind(claim).first<{receipt_id:string}>();
+          if (owner?.receipt_id === id) {
+            await persist(decision).run();
+          } else if (owner) {
+            decision = { status: 'REJECTED', reason: 'DUPLICATE_RECEIPT' };
+            await persist(decision).run();
+          } else {
+            throw new Error('Failed to persist receipt claim');
+          }
+        }
+      }
     } else {
       await persist(decision).run();
     }
   } catch (err) {
-    if (claim && await c.env.DB.prepare('SELECT receipt_id FROM receipt_claims WHERE claim_key = ?')
-      .bind(claim).first()) {
-      decision = { status: 'REJECTED', reason: 'DUPLICATE_RECEIPT' };
-      await persist(decision).run();
-    } else {
-      console.error('AI reprocess persist failed', err);
-      await c.env.DB.prepare(`UPDATE receipts SET status = 'REVIEW_REQUIRED', reason = 'AI_EXTRACTION_FAILED'
-        WHERE id = ? AND status = 'PROCESSING'`).bind(id).run();
-      return c.json({ message: 'Error al persistir el resultado.' }, 500);
-    }
+    console.error('AI reprocess persist failed', err instanceof Error ? err.message : 'unknown');
+    await c.env.DB.prepare(`UPDATE receipts SET status = 'REVIEW_REQUIRED', reason = 'AI_EXTRACTION_FAILED'
+      WHERE id = ? AND status = 'PROCESSING'`).bind(id).run();
+    return c.json({ message: 'Error al persistir el resultado.' }, 500);
   }
   return c.json({ id, status: decision.status, reason: decision.reason,
     message: 'Reprocesamiento finalizado.', receipt: extracted ? {
