@@ -33,7 +33,7 @@ accessForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   accessError.textContent = '';
   const pin = pinInput.value.trim();
-  if (!/^\\d{6}$/.test(pin)) {
+  if (!/^\d{6}$/.test(pin)) {
     accessError.textContent = 'Ingresa 6 dígitos.';
     return;
   }
