@@ -9,7 +9,7 @@
 <body>
   <main class="container">
     <header><span class="eyebrow">MVP · Fase 1</span><h1>Comprobantes bancarios</h1>
-      <p>Sube un comprobante de depósito o transferencia. Por ahora solo se almacena y se detectan archivos idénticos; la validación documental se implementará en la siguiente fase.</p>
+      <p>Sube un comprobante de depósito o transferencia. El análisis documental requiere código de acceso al momento de enviar.</p>
     </header>
     <section class="panel" aria-label="Carga de comprobante">
       <form id="uploadForm">
@@ -21,6 +21,17 @@
       </form>
       <output id="result" role="status" aria-live="polite"></output>
     </section>
+    <dialog id="accessDialog" aria-labelledby="accessTitle">
+      <form id="accessForm">
+        <h2 id="accessTitle">Código de acceso</h2>
+        <p>Ingresa el código de 6 dígitos para enviar tu comprobante.</p>
+        <label for="accessPin">Código</label>
+        <input id="accessPin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" required />
+        <output id="accessError" class="error" role="alert"></output>
+        <button type="submit">Acceder y validar</button>
+        <button type="button" class="secondary" onclick="document.querySelector('#accessDialog').close()">Cancelar</button>
+      </form>
+    </dialog>
     <footer>Los archivos originales se almacenan de manera privada. No se confirma ningún pago.</footer>
   </main>
   <script src="/config.js"></script>
