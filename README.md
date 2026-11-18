@@ -124,3 +124,27 @@ El motor compara el número destino completo (solo dígitos, quitando espacios y
 - Sin cuentas activas en la allowlist: `REVIEW_REQUIRED / NO_ALLOWED_ACCOUNTS_CONFIGURED`.
 
 No confundimos el banco emisor con el de la cuenta destino. La extracción separa `destinationAccount`, `recipientName` y `senderName`. La autorización se basa en el número completo, no en un nombre parecido. El cambio no reevalúa automáticamente los comprobantes históricos.
+
+## Issue #4 — PIN de acceso al enviar comprobantes
+
+El formulario permanece visible. Al pulsar Validar, el navegador consulta `GET /api/auth/session`;
+si no hay sesión presenta un modal con PIN de 6 dígitos. `POST /api/auth/login` emite cookie
+`HttpOnly; Secure; SameSite=Strict; Path=/api` válida 8 horas. Se requiere una sesión
+en el **servidor** para `POST /api/receipts`, incluso si se invoca con curl.
+
+Antes del despliegue configura dos secretos del Worker (no en el frontend ni en GitHub):
+```bash
+pnpm exec wrangler secret put ACCESS_PIN
+# Ingresa tu código de exactamente 6 dígitos.
+pnpm exec wrangler secret put AUTH_PEPPER
+# Ingresa una cadena aleatoria de al menos 32 caracteres (ej. openssl rand -hex 32).
+```
+La migración `0005_access_sessions.sql` crea sesiones y contadores de intentos.
+Se permiten hasta 5 intentos por IP durante 15 minutos, y la sesión se guarda
+como hash SHA-256 de un token aleatorio de 256 bits. El PIN existe solo como
+secreto del Worker; este MVP usa **un código compartido**, no cuentas individuales.
+Se rechazan peticiones POST con `Origin` diferente o ausente.
+
+El acceso limita usos no autorizados, pero no sustituye una identidad individual.
+Quien conozca el PIN puede compartirlo. Para rotarlo, actualiza ACCESS_PIN;
+para invalidar las sesiones existentes elimina los registros de `auth_sessions`.
