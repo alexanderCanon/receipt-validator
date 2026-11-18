@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administración · Receipt Validator</title><link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/admin.css"></head>
+<body>
+<main class="admin-container">
+  <header><span class="eyebrow">Administración</span><h1>Revisión de comprobantes</h1>
+    <p>Los originales se obtienen exclusivamente a través de un endpoint autenticado. Las decisiones quedan registradas en D1.</p>
+    <a href="/">Volver al validador</a>
+  </header>
+  <section id="adminLogin" class="panel">
+    <form id="adminLoginForm">
+      <label for="adminToken">Token de administración</label>
+      <input id="adminToken" type="password" required autocomplete="off" placeholder="Credencial administrativa">
+      <button type="submit">Iniciar sesión administrativa</button>
+    </form>
+  </section>
+  <section id="adminWorkspace" hidden>
+    <div class="toolbar">
+      <label for="statusFilter">Estado</label>
+      <select id="statusFilter"><option value="REVIEW_REQUIRED">Pendientes de revisión</option>
+        <option value="ALL">Todos</option><option value="APPROVED">Aprobados</option>
+        <option value="REJECTED">Rechazados</option></select>
+      <button id="refreshBtn" type="button">Actualizar</button>
+      <button id="logoutBtn" class="secondary" type="button">Cerrar sesión</button>
+    </div>
+    <div class="admin-grid">
+      <section class="panel" aria-label="Comprobantes">
+        <h2>Historial</h2>
+        <div id="receiptList" class="receipt-list"></div>
+        <button class="secondary" id="moreBtn" type="button" hidden>Cargar más</button>
+      </section>
+      <section class="panel detail" aria-label="Detalle">
+        <h2>Detalle</h2>
+        <p id="emptyDetail">Selecciona un comprobante.</p>
+        <div id="receiptDetail" hidden>
+          <div class="detail-summary" id="detailSummary"></div>
+          <img id="receiptImage" alt="Original privado del comprobante" hidden>
+          <form id="reviewForm">
+            <h3>Datos para revisión</h3>
+            <div id="reviewFields" class="fields"></div>
+            <label for="reviewNote">Justificación de la decisión</label>
+            <textarea id="reviewNote" rows="3" minlength="5" maxlength="1000" required placeholder="Describe lo verificado visualmente"></textarea>
+            <div class="actions">
+              <button type="button" id="approveBtn">Aprobar documentalmente</button>
+              <button type="button" class="danger" id="rejectBtn">Rechazar</button>
+            </div>
+          </form>
+          <section><h3>Auditoría de revisión</h3><div id="reviewHistory"></div></section>
+        </div>
+      </section>
+    </div>
+  </section>
+  <output id="adminMessage" role="status" aria-live="polite"></output>
+</main>
+<script src="/admin.js" defer></script>
+</body></html>
