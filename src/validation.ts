@@ -8,6 +8,8 @@ export type ExtractedReceipt = {
   transactionDate: string | null;
   transactionTime: string | null;
   destinationAccount: string | null;
+  recipientName: string | null;
+  senderName: string | null;
   suspectedTampering: boolean;
   anomalies: string[];
 };

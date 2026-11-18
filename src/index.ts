@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Bindings } from './types';
 import { MAX_FILE_BYTES, detectImageMime, extensionForMime, hexSha256 } from './file-validation';
 import { extractReceipt } from './extraction';
+import { verifyDestinationAccount } from './accounts';
 import { decideReceipt, guatemalaToday, normalizeClaim } from './validation';
 import type { Decision, ExtractedReceipt } from './validation';
 
@@ -96,6 +97,7 @@ app.post('/api/receipts', async (c) => {
   try {
     extracted = await extractReceipt(c.env, bytes, mime);
     decision = decideReceipt(extracted, guatemalaToday(new Date()));
+    decision = await verifyDestinationAccount(c.env.DB, extracted, decision);
   } catch (error) {
     console.error('AI extraction failed', error instanceof Error ? error.message : 'unknown');
     decision = { status: 'REVIEW_REQUIRED', reason: 'AI_EXTRACTION_FAILED' };
@@ -138,6 +140,9 @@ app.post('/api/receipts', async (c) => {
     CHECK_DEPOSIT: 'No se aceptan depósitos por cheque.',
     EXPIRED_RECEIPT: 'El comprobante tiene más de dos días de antigüedad.',
     DUPLICATE_RECEIPT: 'Este comprobante ya fue utilizado o está pendiente de revisión.',
+    DESTINATION_ACCOUNT_UNREADABLE: 'No se pudo verificar el número completo de cuenta destino. Requiere revisión.',
+    DESTINATION_ACCOUNT_NOT_ALLOWED: 'La cuenta destino no está autorizada para recibir depósitos.',
+    NO_ALLOWED_ACCOUNTS_CONFIGURED: 'Aún no hay cuentas destino autorizadas configuradas. Requiere revisión.',
     POSSIBLE_TAMPERING: 'El comprobante requiere revisión por posibles anomalías.',
     UNREADABLE_DATE: 'La fecha no se pudo verificar. Se requiere revisión.',
     FUTURE_DATE: 'La fecha del comprobante es futura. Se requiere revisión.',
@@ -152,6 +157,7 @@ app.post('/api/receipts', async (c) => {
     receipt: extracted ? {
       bank: extracted.bank, operationType: extracted.operationType, reference: extracted.reference,
       amount: extracted.amount, currency: extracted.currency, transactionDate: extracted.transactionDate,
+      destinationAccount: extracted.destinationAccount, recipientName: extracted.recipientName,
     } : null,
   }, httpStatus);
 });
@@ -237,6 +243,7 @@ app.post('/api/admin/receipts/:id/reprocess', async (c) => {
     message: 'Reprocesamiento finalizado.', receipt: extracted ? {
       bank: extracted.bank, reference: extracted.reference, amount: extracted.amount,
       operationType: extracted.operationType, transactionDate: extracted.transactionDate,
+      destinationAccount: extracted.destinationAccount, recipientName: extracted.recipientName,
     } : null,
   });
 });

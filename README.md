@@ -105,3 +105,22 @@ Este endpoint admite únicamente comprobantes `REVIEW_REQUIRED` por
 `AI_EXTRACTION_FAILED` o `AI_OUTPUT_UNVERIFIED`, con **máximo dos reprocesamientos**.
 Reutiliza el original privado de R2 y no crea un archivo duplicado.
 No permite revisar manualmente, ni consultar imágenes públicas.
+
+## Cuentas bancarias permitidas (Issue #3)
+
+La migración `0004_allowed_bank_accounts.sql` crea una allowlist inicialmente vacía en D1. Se exige el **número completo de cuenta destino**, no el nombre del beneficiario, números ocultos ni la cuenta de origen.
+
+Para incorporar una cuenta autorizada por el administrador (reemplazar ejemplos localmente con valores reales, no almacenarlos en Git):
+```bash
+pnpm exec wrangler d1 execute receipt-validator-db --remote \
+  --command "INSERT INTO allowed_bank_accounts (account_number, bank_name, label) VALUES ('123456789012', 'BANRURAL', 'Cuenta recaudadora');"
+```
+No publiques números reales de cuentas o extractos. Para deshabilitar una cuenta: `UPDATE allowed_bank_accounts SET is_active=0 WHERE account_number='...';`
+
+El motor compara el número destino completo (solo dígitos, quitando espacios y guiones) con cuentas activas:
+- Coincide: puede aprobar documentalmente si supera todas las demás reglas.
+- No coincide: `REJECTED / DESTINATION_ACCOUNT_NOT_ALLOWED`.
+- Sin número completo, solo nombre o número enmascarado: `REVIEW_REQUIRED / DESTINATION_ACCOUNT_UNREADABLE`.
+- Sin cuentas activas en la allowlist: `REVIEW_REQUIRED / NO_ALLOWED_ACCOUNTS_CONFIGURED`.
+
+No confundimos el banco emisor con el de la cuenta destino. La extracción separa `destinationAccount`, `recipientName` y `senderName`. La autorización se basa en el número completo, no en un nombre parecido. El cambio no reevalúa automáticamente los comprobantes históricos.
