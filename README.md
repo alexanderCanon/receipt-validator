@@ -176,3 +176,12 @@ Revalida la cuenta autorizada y evita rechazar una referencia reservada por el m
 
 IMPORTANTE: el panel maneja recibos y datos de terceros. Mantén privado el token de
 administración, limita quién puede acceder y no compartas los comprobantes.
+
+## Integración con Neversion Digital
+
+El Worker de Neversion Digital envía imágenes mediante un Service Binding a
+`POST /api/integrations/neversion/receipts`. Configura el mismo secreto de
+Cloudflare `RECEIPT_INTEGRATION_KEY` en ambos Workers. Usa un valor aleatorio
+de 32 caracteres como mínimo y aplica la migración `0007` antes de desplegar.
+El usuario que validó el comprobante queda identificado en `submitted_by`.
+El formulario web conserva su autenticación y Turnstile.

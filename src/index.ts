@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { Bindings } from './types';
 import { MAX_FILE_BYTES, detectImageMime, extensionForMime, hexSha256 } from './file-validation';
 import { extractReceipt } from './extraction';
 import { sameOrigin, sessionActive, login, logout, expiredCookie } from './auth';
-import { validAdminBearer, validAdminCookie } from './admin-auth';
+import { equalSecrets, validAdminBearer, validAdminCookie } from './admin-auth';
 import admin from './admin-review';
 import { verifyDestinationAccount } from './accounts';
 import { decideReceipt, guatemalaToday, normalizeClaim } from './validation';
@@ -68,13 +69,7 @@ app.post('/api/auth/logout', async (c) => {
   return c.json({ authenticated: false });
 });
 
-app.post('/api/receipts', async (c) => {
-  // Authentication is enforced server-side BEFORE upload, R2, D1, and Workers AI.
-  if (!sameOrigin(c.req.raw)) return c.json({ message: 'Origen no autorizado.' }, 403);
-  if (!await sessionActive(c.req.raw, c.env.DB)) {
-    return c.json({ reason: 'AUTH_REQUIRED', message: 'Ingresa tu código para validar comprobantes.' }, 401);
-  }
-
+async function processReceipt(c: Context<{ Bindings: Bindings }>, actor?: string) {
   const declaredLength = Number(c.req.header('content-length') || 0);
   if (declaredLength > MAX_FILE_BYTES + 100_000) {
     return c.json({ status: 'REJECTED', reason: 'FILE_TOO_LARGE', message: 'Máximo 5 MB por imagen.' }, 413);
@@ -88,14 +83,18 @@ app.post('/api/receipts', async (c) => {
   try { form = await c.req.raw.formData(); }
   catch { return c.json({ status: 'REJECTED', reason: 'INVALID_FORM', message: 'Formulario inválido.' }, 400); }
 
-  const token = form.get('cf-turnstile-response');
-  const authorized = await verifyTurnstile(
-    typeof token === 'string' ? token : undefined,
-    c.env,
-    c.req.url,
-    c.req.header('cf-connecting-ip'),
-  );
-  if (!authorized) return c.json({ status: 'REJECTED', reason: 'TURNSTILE_REQUIRED', message: 'Verificación de seguridad no superada.' }, 403);
+  if (!actor) {
+    const token = form.get('cf-turnstile-response');
+    const authorized = await verifyTurnstile(
+      typeof token === 'string' ? token : undefined,
+      c.env,
+      c.req.url,
+      c.req.header('cf-connecting-ip'),
+    );
+    if (!authorized) {
+      return c.json({ status: 'REJECTED', reason: 'TURNSTILE_REQUIRED', message: 'Verificación de seguridad no superada.' }, 403);
+    }
+  }
 
   const file = form.get('receipt');
   if (!(file instanceof File)) return c.json({ status: 'REJECTED', reason: 'MISSING_FILE', message: 'Adjunta una imagen.' }, 400);
@@ -121,9 +120,9 @@ app.post('/api/receipts', async (c) => {
 
   try {
     await c.env.DB.prepare(`INSERT INTO receipts
-      (id, r2_key, sha256, mime_type, size_bytes, original_filename, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING_ANALYSIS')`)
-      .bind(id, key, sha256, mime, file.size, file.name.slice(0, 160)).run();
+      (id, r2_key, sha256, mime_type, size_bytes, original_filename, status, submitted_by)
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING_ANALYSIS', ?)`)
+      .bind(id, key, sha256, mime, file.size, file.name.slice(0, 160), actor ?? null).run();
   } catch (err) {
     await c.env.RECEIPTS.delete(key).catch(() => {});
     const race = await c.env.DB.prepare('SELECT id FROM receipts WHERE sha256 = ?').bind(sha256).first();
@@ -200,6 +199,25 @@ app.post('/api/receipts', async (c) => {
       destinationAccount: extracted.destinationAccount, recipientName: extracted.recipientName,
     } : null,
   }, httpStatus);
+}
+
+app.post('/api/receipts', async (c) => {
+  if (!sameOrigin(c.req.raw)) return c.json({ message: 'Origen no autorizado.' }, 403);
+  if (!await sessionActive(c.req.raw, c.env.DB)) {
+    return c.json({ reason: 'AUTH_REQUIRED', message: 'Ingresa tu código para validar comprobantes.' }, 401);
+  }
+  return processReceipt(c);
+});
+
+app.post('/api/integrations/neversion/receipts', async (c) => {
+  const key = c.env.RECEIPT_INTEGRATION_KEY;
+  const actor = c.req.header('X-Neversion-Actor') ?? '';
+  if (!key || key.length < 32 || !/^(admin|[a-f0-9-]{36})$/.test(actor) ||
+      !await equalSecrets(c.req.header('Authorization') ?? '', 'Bearer ' + key)) {
+    return c.json({ message: 'Acceso restringido.' }, 401);
+  }
+  c.header('Cache-Control', 'no-store');
+  return processReceipt(c, actor);
 });
 
 app.get('/api/receipts/:id', async (c) => {

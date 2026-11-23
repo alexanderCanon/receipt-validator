@@ -60,7 +60,7 @@ admin.get('/receipts', async (c)=>{
   if (cursor && !hasCursor) return c.json({message:'Cursor inválido'},400);
   const [beforeDate,beforeId] = hasCursor ? cursor.split('|') : ['', ''];
   const clause = status === 'ALL' ? '' : 'AND status = ?';
-  const sql = `SELECT id,status,reason,mime_type,created_at,processed_at,retry_count,
+  const sql = `SELECT id,status,reason,mime_type,created_at,processed_at,retry_count,submitted_by,
     json_extract(extracted_json,'$.bank') AS bank,
     json_extract(extracted_json,'$.amount') AS amount,
     json_extract(extracted_json,'$.currency') AS currency,
@@ -82,7 +82,7 @@ admin.get('/receipts/:id', async (c)=>{
   const id = c.req.param('id');
   if (!UUID.test(id)) return c.json({message:'ID inválido'},400);
   const result = await c.env.DB.prepare(`SELECT id,status,reason,mime_type,created_at,
-     processed_at,retry_count,original_filename,extracted_json,anomalies_json
+     processed_at,retry_count,submitted_by,original_filename,extracted_json,anomalies_json
      FROM receipts WHERE id=?`).bind(id).first();
   if (!result) return c.json({message:'No encontrado'},404);
   const reviews = await c.env.DB.prepare(`SELECT id,action,previous_status,previous_reason,note,created_at

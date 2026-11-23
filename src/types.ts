@@ -7,5 +7,6 @@ export type Bindings = {
   ADMIN_REPROCESS_TOKEN?: string;
   ACCESS_PIN?: string;
   AUTH_PEPPER?: string;
+  RECEIPT_INTEGRATION_KEY?: string;
 };
 export type ReceiptStatus = 'APPROVED' | 'REJECTED' | 'REVIEW_REQUIRED';

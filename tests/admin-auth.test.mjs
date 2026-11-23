@@ -23,3 +23,11 @@ test('tampered and forged admin cookies fail',async()=>{
   assert.equal(await validAdminCookie(new Request('https://example.com',{headers:{Cookie:cookie}}),{ADMIN_REPROCESS_TOKEN:'different-test-secret-long-enough'}),false);
   assert.match(clearAdminCookie(),/Max-Age=0/);
 });
+
+test('the integration secret comparison rejects absent and changed values', async () => {
+  const { equalSecrets } = await import('../src/admin-auth.ts');
+  const key = 'test-only-key-not-a-real-secret';
+  assert.equal(await equalSecrets(key, key), true);
+  assert.equal(await equalSecrets('', key), false);
+  assert.equal(await equalSecrets(key + 'x', key), false);
+});
