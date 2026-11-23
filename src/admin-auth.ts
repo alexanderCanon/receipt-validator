@@ -13,7 +13,7 @@ async function sign(secret: string, value: string): Promise<string> {
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return hex(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value))));
 }
-async function equals(a: string, b: string): Promise<boolean> {
+export async function equalSecrets(a: string, b: string): Promise<boolean> {
   if (!a || !b || a.length > 512 || b.length > 512) return false;
   const [x,y] = await Promise.all([sha256(a),sha256(b)]);
   let difference = 0;
@@ -22,7 +22,7 @@ async function equals(a: string, b: string): Promise<boolean> {
 }
 export async function validAdminToken(value: string | null, env: Bindings): Promise<boolean> {
   return !!env.ADMIN_REPROCESS_TOKEN && env.ADMIN_REPROCESS_TOKEN.length >= 24 &&
-    !!value && await equals(value, env.ADMIN_REPROCESS_TOKEN);
+    !!value && await equalSecrets(value, env.ADMIN_REPROCESS_TOKEN);
 }
 export async function validAdminBearer(req: Request, env: Bindings): Promise<boolean> {
   const header = req.headers.get('Authorization');
@@ -52,5 +52,5 @@ export async function validAdminCookie(req: Request, env: Bindings): Promise<boo
   const expires = Number(expiry), now = Math.floor(Date.now()/1000);
   if (expires <= now || expires > now + SESSION_SECONDS) return false;
   const expected = await sign(env.ADMIN_REPROCESS_TOKEN, `${expiry}.${nonce}`);
-  return equals(expected, signature);
+  return equalSecrets(expected, signature);
 }
